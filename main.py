@@ -54,13 +54,17 @@ def build_record_command(url: str, out_path: str):
         "yt-dlp", url, 
         "-f", "best[height<=720]/best",  # Limit quality to reduce bandwidth/processing
         "-o", out_path, 
-        "--impersonate", "chrome", 
         "--no-part",
         "--retries", "10",  # Retry on failures
         "--fragment-retries", "10",  # Retry fragments
         "--socket-timeout", "30",  # Connection timeout
-        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "--add-header", "Accept-Language:en-US,en;q=0.9",
+        "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "--add-header", "Accept-Encoding:gzip, deflate, br",
+        "--add-header", "DNT:1",
+        "--add-header", "Connection:keep-alive",
+        "--add-header", "Upgrade-Insecure-Requests:1",
         "--verbose"  # More detailed logging for debugging
     ]
 
