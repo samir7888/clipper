@@ -19,11 +19,25 @@ import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from job_manager import JobManager, JobStatus
 
 app = FastAPI(title="Streamer Clip Generator")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8000", 
+        "http://127.0.0.1:8000",
+        "https://clipper-kgln.onrender.com"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 manager = JobManager(jobs_root=os.path.join(os.path.dirname(__file__), "jobs"))
 
 
@@ -33,11 +47,22 @@ class LiveRequest(BaseModel):
 
 def build_record_command(url: str, out_path: str):
     """
-    PRODUCTION command: pull a live  stream with yt-dlp until it ends
-    naturally or is terminated. --impersonate chrome avoids some of the
-    bot-detection issues 's downloads have had recently.
+    PRODUCTION command: pull a live stream with yt-dlp until it ends
+    naturally or is terminated. Enhanced options for cloud/production reliability.
     """
-    return ["yt-dlp", url, "-f", "best", "-o", out_path, "--impersonate", "chrome", "--no-part"]
+    return [
+        "yt-dlp", url, 
+        "-f", "best[height<=720]/best",  # Limit quality to reduce bandwidth/processing
+        "-o", out_path, 
+        "--impersonate", "chrome", 
+        "--no-part",
+        "--retries", "10",  # Retry on failures
+        "--fragment-retries", "10",  # Retry fragments
+        "--socket-timeout", "30",  # Connection timeout
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "--add-header", "Accept-Language:en-US,en;q=0.9",
+        "--verbose"  # More detailed logging for debugging
+    ]
 
 
 @app.post("/jobs/live")

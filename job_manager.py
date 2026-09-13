@@ -160,7 +160,14 @@ class JobManager:
         os.makedirs(job.dir, exist_ok=True)
 
         cmd = record_command_builder(url, job.raw_path)
-        job.process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"Starting recording with command: {' '.join(cmd)}")
+        # Capture stderr to see what yt-dlp is actually doing
+        job.process = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            text=True
+        )
 
         threading.Thread(target=self._watch_recording, args=(job,), daemon=True).start()
         with self.lock:
@@ -194,15 +201,29 @@ class JobManager:
     # ---------- the watcher: handles BOTH stop-clicked and stream-ended-naturally ----------
 
     def _watch_recording(self, job: Job):
-        job.process.wait()  # blocks until the process exits, for ANY reason
+        stdout, stderr = job.process.communicate()  # blocks until process exits, captures output
         job.stopped_at = time.time()
+        
+        # Log the process output for debugging
+        print(f"Job {job.id} recording finished with return code: {job.process.returncode}")
+        if stdout:
+            print(f"Job {job.id} stdout: {stdout}")
+        if stderr:
+            print(f"Job {job.id} stderr: {stderr}")
+            
+        # Store stderr for potential error reporting
+        job.process_stderr = stderr
         self._process_job(job)
 
     def _process_job(self, job: Job):
         job.status = JobStatus.PROCESSING
         try:
             if not os.path.exists(job.raw_path) or os.path.getsize(job.raw_path) == 0:
-                raise RuntimeError("No video was recorded/uploaded (empty or missing file).")
+                error_msg = "No video was recorded/uploaded (empty or missing file)."
+                # Include yt-dlp stderr if available for debugging
+                if hasattr(job, 'process_stderr') and job.process_stderr:
+                    error_msg += f" yt-dlp error: {job.process_stderr[:500]}"  # Limit error length
+                raise RuntimeError(error_msg)
 
             os.makedirs(job.clips_dir, exist_ok=True)
 
