@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Environment / secrets
+.env
+.env.local
+
+# This project's generated data — never commit raw videos or clips
+jobs/
+clips/
+*.mp4
+*.mov
+*.mkv
+*.jpg
+*.jpeg
+*.png
+!static/**/*.jpg
+!static/**/*.jpeg
+!static/**/*.png
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log

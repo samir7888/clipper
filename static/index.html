@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clip Machine — Free Auto Clip Generator for  Streamers</title>
+<meta name="description" content="Turn your  live stream or VOD into vertical short clips automatically. Free highlight detection, facecam-aware reframing for Shorts and TikTok, no editing required.">
+<meta name="keywords" content=" clip generator,  highlight maker, auto clip streams, vertical shorts from vod,  streamer tools, free clip generator">
+<link rel="canonical" href="https://your-app.vercel.app/">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0b0d">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Clip Machine — Free Auto Clip Generator for  Streamers">
+<meta property="og:description" content="Paste your  stream link and get downloadable, vertical highlight clips automatically — free, no editing needed.">
+<meta property="og:url" content="https://your-app.vercel.app/">
+<meta property="og:image" content="https://your-app.vercel.app/og-image.jpg">
+
+<!-- Twitter card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Clip Machine — Free Auto Clip Generator for  Streamers">
+<meta name="twitter:description" content="Paste your  stream link and get downloadable, vertical highlight clips automatically — free, no editing needed.">
+<meta name="twitter:image" content="https://your-app.vercel.app/og-image.jpg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Clip Machine",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Web",
+  "description": "Automatically generates vertical highlight clips from  live streams and VODs, with facecam-aware reframing for Shorts and TikTok.",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is Clip Machine free to use?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Paste a stream link or upload a VOD and generate clips at no cost." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work with  live streams?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Paste your  stream link before you go live, and it records automatically until you stop or the stream ends." }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need video editing skills?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No editing is required. Highlights are detected and reformatted for vertical video automatically." }
+    },
+    {
+      "@type": "Question",
+      "name": "Will clips include my facecam?",
+      "acceptedAnswer": { "@type": "Answer", "text": "If a facecam is detected, clips are automatically laid out with gameplay on top and the facecam zoomed in below, matching the format used on Shorts and TikTok." }
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --bg: #0a0b0d;
+    --surface: #15171c;
+    --surface-2: #1d2027;
+    --line: #262a33;
+    --text: #eef0f3;
+    --muted: #868d99;
+    --accent: #53fc18;
+    --accent-dim: #2f7d10;
+    --live: #ff4757;
+    --warn: #ffb020;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text); margin: 0;
+    font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, .display { font-family: 'Space Grotesk', sans-serif; }
+
+  .shell { max-width: 640px; margin: 0 auto; padding: 48px 20px 80px; }
+
+  header { margin-bottom: 32px; }
+  header h1 { font-size: 24px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  header p { color: var(--muted); margin: 0; font-size: 14px; line-height: 1.5; max-width: 46ch; }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 22px; margin-bottom: 16px;
+  }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+  .tab-btn {
+    flex: 1; padding: 9px; border-radius: 9px; border: 1px solid var(--line);
+    background: transparent; color: var(--muted); font-size: 13px; font-weight: 500;
+    cursor: pointer; font-family: inherit; transition: background .15s, color .15s;
+  }
+  .tab-btn.active { background: var(--surface-2); color: var(--text); border-color: var(--line); }
+
+  label.field-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+
+  input[type=text] {
+    width: 100%; padding: 12px 14px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 14px; font-family: inherit;
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent-dim); outline-offset: 1px; }
+  input[type=text]::placeholder { color: #4d525c; }
+
+  input[type=file] {
+    width: 100%; padding: 12px; border-radius: 9px; border: 1px dashed var(--line);
+    background: var(--bg); color: var(--muted); font-size: 13px; font-family: inherit;
+  }
+
+  .btn {
+    width: 100%; margin-top: 12px; padding: 12px 16px; border-radius: 9px; border: none;
+    font-weight: 600; font-size: 14px; cursor: pointer; font-family: inherit;
+    transition: filter .15s, transform .05s;
+  }
+  .btn:active { transform: scale(0.99); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #08260a; }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-stop { background: transparent; border: 1px solid var(--live); color: var(--live); }
+  .btn-stop:hover:not(:disabled) { background: rgba(255,71,87,0.08); }
+
+  .status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0;
+  }
+  .dot.live { background: var(--live); animation: pulse 1.4s ease-in-out infinite; }
+  .dot.processing { background: var(--warn); }
+  .dot.ready { background: var(--accent); }
+  .dot.failed { background: var(--live); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,71,87,0.5); }
+    50% { box-shadow: 0 0 0 6px rgba(255,71,87,0); }
+  }
+
+  .status-text { font-size: 14px; font-weight: 500; }
+  .status-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  .progress-track {
+    height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden;
+    margin-top: 14px;
+  }
+  .progress-fill {
+    height: 100%; width: 40%; background: var(--warn);
+    animation: slide 1.2s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+  }
+
+  .clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 16px; }
+  .clip-card {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .clip-thumb {
+    aspect-ratio: 9 / 16; background: linear-gradient(160deg, #1d2027, #12141a);
+    display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 22px;
+    cursor: pointer; position: relative; overflow: hidden;
+  }
+  .clip-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .clip-thumb .play-badge {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.15); font-size: 28px; color: #fff; opacity: 0; transition: opacity .15s;
+  }
+  .clip-thumb:hover .play-badge { opacity: 1; background: rgba(0,0,0,0.35); }
+
+  .save-row { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+  .save-row .btn { margin-top: 0; width: auto; flex-shrink: 0; }
+  .btn-ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
+  .btn-ghost:hover:not(:disabled) { border-color: #3a3f4a; }
+  .save-status { font-size: 12px; color: var(--muted); }
+
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex;
+    align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .modal-video { max-height: 85vh; max-width: 90vw; border-radius: 10px; background: #000; }
+  .modal-close {
+    position: absolute; top: 20px; right: 24px; color: #fff; font-size: 28px;
+    cursor: pointer; background: none; border: none; line-height: 1;
+  }
+  .clip-meta { padding: 8px 10px; }
+  .clip-name { font-size: 11px; color: var(--muted); margin-bottom: 6px; word-break: break-all; }
+  .clip-dl {
+    display: block; text-align: center; font-size: 12px; font-weight: 600;
+    color: #08260a; background: var(--accent); border-radius: 6px; padding: 6px; text-decoration: none;
+  }
+
+  .hidden { display: none; }
+
+  /* ---- Marketing / SEO sections ---- */
+  nav.topnav {
+    max-width: 900px; margin: 0 auto; padding: 20px 20px 0; display: flex;
+    justify-content: space-between; align-items: center; font-size: 14px;
+  }
+  nav.topnav .brand { font-family: 'Space Grotesk', sans-serif; font-weight: 700; color: var(--text); text-decoration: none; }
+  nav.topnav a.navlink { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 13px; }
+  nav.topnav a.navlink:hover { color: var(--text); }
+
+  .hero { max-width: 640px; margin: 0 auto; padding: 56px 20px 12px; text-align: left; }
+  .hero h1 { font-size: 32px; line-height: 1.15; margin: 0 0 14px; letter-spacing: -0.01em; }
+  .hero p.lede { color: var(--muted); font-size: 16px; line-height: 1.6; max-width: 52ch; margin: 0; }
+
+  .content-section { max-width: 640px; margin: 0 auto; padding: 56px 20px; border-top: 1px solid var(--line); }
+  .content-section h2 { font-size: 20px; margin: 0 0 20px; }
+  .content-section p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+  .steps-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+  .steps-list li { display: flex; gap: 14px; }
+  .step-num {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-2);
+    border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+    font-family: 'Space Grotesk', sans-serif; font-size: 13px; color: var(--accent);
+  }
+  .steps-list strong { display: block; font-size: 14px; margin-bottom: 2px; }
+  .steps-list span { color: var(--muted); font-size: 13px; }
+
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .feature-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .feature-card h3 { font-size: 14px; margin: 0 0 6px; }
+  .feature-card p { font-size: 13px; margin: 0; }
+
+  .faq-item { border-bottom: 1px solid var(--line); padding: 16px 0; }
+  .faq-item:first-child { padding-top: 0; }
+  .faq-item summary { cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text); list-style: none; }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::before { content: '+'; color: var(--accent); margin-right: 10px; font-family: 'Space Grotesk', sans-serif; }
+  .faq-item[open] summary::before { content: '\2212'; }
+  .faq-item p { margin: 10px 0 0 20px; }
+
+  footer.sitefoot {
+    max-width: 640px; margin: 0 auto; padding: 32px 20px 60px; display: flex;
+    justify-content: space-between; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line);
+  }
+
+  @media (max-width: 480px) {
+    .feature-grid { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="#top">Clip Machine</a>
+  <div>
+    <a class="navlink" href="#how-it-works">How it works</a>
+    <a class="navlink" href="#features">Features</a>
+    <a class="navlink" href="#faq">FAQ</a>
+  </div>
+</nav>
+
+<div class="hero" id="top">
+  <h1>Turn your  stream into short clips automatically</h1>
+  <p class="lede">Paste your stream link before you go live, or drop in a finished VOD. Clip Machine finds the best moments, reformats them for Shorts and TikTok, and has them ready the moment your stream ends — free, no editing required.</p>
+</div>
+
+<div class="shell">
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab-btn active" id="tabLive" onclick="showTab('live')">Live stream</button>
+      <button class="tab-btn" id="tabUpload" onclick="showTab('upload')">Upload a VOD</button>
+    </div>
+
+    <div id="liveTabPanel">
+      <label class="field-label" for="liveUrl">Stream URL</label>
+      <input type="text" id="liveUrl" placeholder="Your stream url">
+      <button class="btn btn-primary" onclick="startLive()">Start pulling stream</button>
+    </div>
+
+    <div id="uploadTabPanel" class="hidden">
+      <label class="field-label" for="fileInput">Video file</label>
+      <input type="file" id="fileInput" accept="video/mp4">
+      <button class="btn btn-primary" onclick="uploadVod()">Upload and generate clips</button>
+    </div>
+  </div>
+
+  <div class="panel hidden" id="jobPanel">
+    <div class="status-row">
+      <div class="dot" id="statusDot"></div>
+      <div>
+        <div class="status-text" id="statusText">—</div>
+        <div class="status-sub" id="statusSub"></div>
+      </div>
+    </div>
+    <div class="progress-track hidden" id="progressTrack"><div class="progress-fill"></div></div>
+    <button class="btn btn-stop hidden" id="stopBtn" onclick="stopJob()">Stop stream</button>
+
+    <div class="save-row hidden" id="saveRow">
+      <button class="btn btn-ghost" onclick="chooseSaveFolder()">Choose folder to auto-save clips</button>
+      <span class="save-status" id="saveStatus"></span>
+    </div>
+
+    <div class="clip-grid" id="clipsGrid"></div>
+  </div>
+</div>
+
+<section class="content-section" id="how-it-works">
+  <h2>How it works</h2>
+  <ul class="steps-list">
+    <li>
+      <div class="step-num">1</div>
+      <div><strong>Paste your stream link or upload a VOD</strong><span>Works with a live  URL or a finished recording — same result either way.</span></div>
+    </li>
+    <li>
+      <div class="step-num">2</div>
+      <div><strong>Go live as usual</strong><span>Recording stops automatically the moment your stream ends, or whenever you click Stop.</span></div>
+    </li>
+    <li>
+      <div class="step-num">3</div>
+      <div><strong>Highlights are found automatically</strong><span>The loudest, most reactive moments in your stream are detected and cut into clips.</span></div>
+    </li>
+    <li>
+      <div class="step-num">4</div>
+      <div><strong>Clips are reformatted for Shorts and TikTok</strong><span>Gameplay on top, facecam zoomed in below, vertical and ready to post.</span></div>
+    </li>
+    <li>
+      <div class="step-num">5</div>
+      <div><strong>Play, download, or auto-save</strong><span>Preview clips right in the browser, or save them straight to a folder on your device.</span></div>
+    </li>
+  </ul>
+</section>
+
+<section class="content-section" id="features">
+  <h2>Built for streamers who don't have time to edit</h2>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <h3>Automatic highlight detection</h3>
+      <p>No manual scrubbing through hours of footage looking for good moments.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Facecam-aware layout</h3>
+      <p>Detects your webcam overlay and builds the gameplay-on-top, face-below format used across Shorts and TikTok.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Live or VOD, your choice</h3>
+      <p>Record a stream as it happens, or generate clips from something you've already uploaded.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Nothing kept longer than needed</h3>
+      <p>Your raw recording is deleted automatically once clips are generated.</p>
+    </div>
+  </div>
+</section>
+
+<section class="content-section" id="faq">
+  <h2>Frequently asked questions</h2>
+  <details class="faq-item">
+    <summary>Is Clip Machine free to use?</summary>
+    <p>Yes. Paste a stream link or upload a VOD and generate clips at no cost.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Does it work with  live streams?</summary>
+    <p>Yes. Paste your  stream link before you go live, and it records automatically until you stop or the stream ends.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Do I need video editing skills?</summary>
+    <p>No editing is required. Highlights are detected and reformatted for vertical video automatically.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Will clips include my facecam?</summary>
+    <p>If a facecam is detected, clips are automatically laid out with gameplay on top and the facecam zoomed in below, matching the format used on Shorts and TikTok.</p>
+  </details>
+</section>
+
+<footer class="sitefoot">
+  <span>&copy; 2026 Clip Machine</span>
+  <span>Made for  streamers</span>
+</footer>
+
+<div class="modal-backdrop hidden" id="videoModal" onclick="closeModal(event)">
+  <button class="modal-close" onclick="closeModal(event)">&times;</button>
+  <video class="modal-video" id="modalVideo" controls autoplay></video>
+</div>
+
+<script>
+// Point this at your deployed backend URL (Railway or your VM's domain).
+// Leave as an empty string only if frontend and backend are on the same
+// domain (e.g. both served by the same FastAPI app, as in local testing).
+const API_BASE = "https://your-backend-url.up.railway.app";
+
+let currentJobId = null;
+let pollTimer = null;
+let saveDirHandle = null;
+let savedClipNames = new Set();
+
+function showTab(tab) {
+  document.getElementById('liveTabPanel').classList.toggle('hidden', tab !== 'live');
+  document.getElementById('uploadTabPanel').classList.toggle('hidden', tab !== 'upload');
+  document.getElementById('tabLive').classList.toggle('active', tab === 'live');
+  document.getElementById('tabUpload').classList.toggle('active', tab === 'upload');
+}
+
+function setControlsEnabled(enabled) {
+  ['liveUrl', 'fileInput', 'tabLive', 'tabUpload'].forEach(id => document.getElementById(id).disabled = !enabled);
+  document.querySelectorAll('#liveTabPanel .btn, #uploadTabPanel .btn').forEach(b => b.disabled = !enabled);
+}
+
+async function startLive() {
+  const url = document.getElementById('liveUrl').value.trim();
+  if (!url) return alert('Add your stream link first.');
+  setControlsEnabled(false);
+  const res = await fetch(API_BASE + '/jobs/live', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url})
+  });
+  const data = await res.json();
+  onJobStarted(data.job_id, true);
+}
+
+async function uploadVod() {
+  const file = document.getElementById('fileInput').files[0];
+  if (!file) return alert('Choose a video file first.');
+  setControlsEnabled(false);
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(API_BASE + '/jobs/upload', { method: 'POST', body: form });
+  const data = await res.json();
+  onJobStarted(data.job_id, false);
+}
+
+function onJobStarted(jobId, isLive) {
+  currentJobId = jobId;
+  savedClipNames = new Set();
+  document.getElementById('jobPanel').classList.remove('hidden');
+  document.getElementById('stopBtn').classList.toggle('hidden', !isLive);
+  document.getElementById('saveRow').classList.add('hidden');
+  document.getElementById('clipsGrid').innerHTML = '';
+  poll();
+  pollTimer = setInterval(poll, 3000);
+}
+
+async function stopJob() {
+  await fetch(`${API_BASE}/jobs/${currentJobId}/stop`, {method: 'POST'});
+  document.getElementById('stopBtn').classList.add('hidden');
+}
+
+// ---- Auto-save to a folder on the user's own device (File System Access API) ----
+// Chrome/Edge only. If unsupported, the button below is simply hidden and
+// people fall back to the normal per-clip download link.
+const supportsFileSystemAccess = 'showDirectoryPicker' in window;
+
+async function chooseSaveFolder() {
+  try {
+    saveDirHandle = await window.showDirectoryPicker();
+    document.getElementById('saveStatus').textContent = `Auto-saving to "${saveDirHandle.name}"`;
+    // If clips are already sitting there from before this was clicked, save them now too.
+    saveAnyNewClips();
+  } catch (e) {
+    // User cancelled the picker — not an error worth showing.
+  }
+}
+
+async function saveClipToFolder(name) {
+  const res = await fetch(`${API_BASE}/jobs/${currentJobId}/clips/${name}`);
+  const blob = await res.blob();
+  const fileHandle = await saveDirHandle.getFileHandle(name, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+async function saveAnyNewClips() {
+  if (!saveDirHandle) return;
+  const grid = document.getElementById('clipsGrid');
+  const names = [...grid.querySelectorAll('[data-clip-name]')].map(el => el.dataset.clipName);
+  for (const name of names) {
+    if (!savedClipNames.has(name)) {
+      try {
+        await saveClipToFolder(name);
+        savedClipNames.add(name);
+      } catch (e) {
+        console.error('Failed to auto-save', name, e);
+      }
+    }
+  }
+}
+
+// ---- In-browser playback, no download needed ----
+function playClip(name) {
+  const modal = document.getElementById('videoModal');
+  const video = document.getElementById('modalVideo');
+  video.src = `${API_BASE}/jobs/${currentJobId}/clips/${name}`;
+  modal.classList.remove('hidden');
+}
+
+function closeModal(e) {
+  if (e.target.id !== 'videoModal' && e.target.className !== 'modal-close') return;
+  const video = document.getElementById('modalVideo');
+  video.pause();
+  video.src = '';
+  document.getElementById('videoModal').classList.add('hidden');
+}
+
+const STATUS_COPY = {
+  recording: { text: 'Recording your stream', sub: 'Clips start generating the moment you stop or your stream ends.' },
+  processing: { text: 'Generating clips', sub: 'Finding the best moments and reformatting them for Shorts and TikTok.' },
+  ready: { text: 'Clips are ready', sub: 'Play them right here, or download them below.' },
+  failed: { text: 'Something went wrong', sub: '' },
+};
+
+async function poll() {
+  const res = await fetch(`${API_BASE}/jobs/${currentJobId}`);
+  const data = await res.json();
+
+  const dot = document.getElementById('statusDot');
+  const copy = STATUS_COPY[data.status] || { text: data.status, sub: '' };
+
+  dot.className = 'dot ' + data.status;
+  document.getElementById('statusText').textContent = copy.text;
+  document.getElementById('statusSub').textContent = data.status === 'failed' ? (data.error || 'Unknown error.') : copy.sub;
+  document.getElementById('progressTrack').classList.toggle('hidden', data.status !== 'processing');
+
+  if (data.status === 'ready' || data.status === 'failed') {
+    clearInterval(pollTimer);
+    setControlsEnabled(true);
+    document.getElementById('stopBtn').classList.add('hidden');
+  }
+
+  if (data.status === 'ready') {
+    document.getElementById('saveRow').classList.toggle('hidden', !supportsFileSystemAccess);
+    const grid = document.getElementById('clipsGrid');
+    grid.innerHTML = '';
+    data.clips.forEach(name => {
+      const card = document.createElement('div');
+      card.className = 'clip-card';
+      card.dataset.clipName = name;
+      card.innerHTML = `
+        <div class="clip-thumb" onclick="playClip('${name}')">
+          <img src="${API_BASE}/jobs/${currentJobId}/thumbs/${name}" onerror="this.style.display='none'">
+          <div class="play-badge">&#9654;</div>
+        </div>
+        <div class="clip-meta">
+          <div class="clip-name">${name}</div>
+          <a class="clip-dl" href="${API_BASE}/jobs/${currentJobId}/clips/${name}" download>Download</a>
+        </div>`;
+      grid.appendChild(card);
+    });
+    saveAnyNewClips();
+  }
+}
+</script>
+</body>
+</html>
