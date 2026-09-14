@@ -24,7 +24,9 @@ IMPORTANT DESIGN POINT:
 
 import os
 import shutil
+import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -34,6 +36,46 @@ from typing import Optional
 
 import auto_clip
 import vertical_reframe
+
+
+def _terminate_process_tree(proc, timeout=10):
+    """
+    Terminate a subprocess AND any children it spawned. This matters
+    specifically for yt-dlp recording a LIVE stream — it commonly shells out
+    to ffmpeg as a child process for continuous HLS capture. Calling
+    proc.terminate() only kills the yt-dlp parent; the orphaned ffmpeg
+    child keeps running (still writing the file — the stream never
+    "actually" stops), and because it inherited the same stdout/stderr
+    pipes, communicate() in the watcher thread blocks forever waiting for
+    those pipes to close — so clips never get generated either. Killing
+    the whole process GROUP (not just the one process) fixes both.
+    """
+    if proc.poll() is not None:
+        return  # already exited on its own
+
+    try:
+        if sys.platform == "win32":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        pass
+
+    try:
+        proc.wait(timeout=timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    # Didn't die gracefully in time — force kill the whole group so we
+    # never end up stuck with an unkillable orphaned recording.
+    try:
+        if sys.platform == "win32":
+            proc.kill()
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        pass
 
 
 def delete_file_with_retry(path, attempts=6, delay=0.5):
@@ -161,13 +203,17 @@ class JobManager:
 
         cmd = record_command_builder(url, job.raw_path)
         print(f"Starting recording with command: {' '.join(cmd)}")
-        # Capture stderr to see what yt-dlp is actually doing
-        job.process = subprocess.Popen(
-            cmd, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE,
-            text=True
-        )
+        # Capture stderr to see what yt-dlp is actually doing.
+        # start_new_session=True puts this process (and any children it
+        # spawns, e.g. ffmpeg for live HLS) in their own process group, so
+        # we can reliably kill ALL of them together when stopping — see
+        # _terminate_process_tree for why this matters.
+        popen_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        job.process = subprocess.Popen(cmd, **popen_kwargs)
 
         threading.Thread(target=self._watch_recording, args=(job,), daemon=True).start()
         with self.lock:
@@ -193,15 +239,36 @@ class JobManager:
         job = self.jobs.get(job_id)
         if not job or job.status != JobStatus.RECORDING:
             return False
+        print(f"Job {job_id}: Stop requested by user")
         job.stop_requested = True
         if job.process and job.process.poll() is None:
-            job.process.terminate()  # graceful stop signal; recorder finalizes the file
+            print(f"Job {job_id}: Terminating process tree")
+            # Run in a thread: _terminate_process_tree can block briefly
+            # (up to `timeout` seconds) waiting for a graceful exit before
+            # force-killing, and we don't want the API request to hang.
+            threading.Thread(target=_terminate_process_tree, args=(job.process,), daemon=True).start()
         return True
 
     # ---------- the watcher: handles BOTH stop-clicked and stream-ended-naturally ----------
 
     def _watch_recording(self, job: Job):
-        stdout, stderr = job.process.communicate()  # blocks until process exits, captures output
+        stdout = ""
+        stderr = ""
+        
+        try:
+            # Simple approach: wait for the process to finish (either naturally or after terminate)
+            # The terminate() call in stop_job() will cause this to exit
+            stdout, stderr = job.process.communicate()
+                
+        except Exception as e:
+            print(f"Job {job.id}: Error in watch_recording: {e}")
+            if job.process.poll() is None:
+                job.process.kill()
+                try:
+                    stdout, stderr = job.process.communicate(timeout=2)
+                except:
+                    pass
+            
         job.stopped_at = time.time()
         
         # Log the process output for debugging
