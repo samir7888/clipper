@@ -1,4 +1,14 @@
-fastapi
-uvicorn[standard]
-python-multipart
-opencv-python-headless
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27,<1.0
+python-multipart>=0.0.9
+
+# PINNED: do not loosen this. OpenCV 5.x wheels have shipped broken/partial
+# builds where `import cv2` succeeds but core classes like CascadeClassifier
+# are missing entirely, which breaks vertical_reframe.py's face detection.
+# 4.10.0.84 is a known-good, widely-used release.
+opencv-python-headless==4.10.0.84
+
+# numpy 2.x can be ABI-incompatible with wheels built against numpy 1.x,
+# which is another way cv2 can import but misbehave. Pin to the 1.x line
+# that this OpenCV release was built against.
+numpy<2

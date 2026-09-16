@@ -87,7 +87,19 @@ def detect_facecam_box(path, n_samples=12, min_hits=3):
 
     Returns (x, y, w, h) in source pixel coordinates, or None if not confident.
     """
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    # Defensive: if OpenCV is installed but broken (a partial/incompatible
+    # wheel where cv2 imports yet core classes are missing), don't fail the
+    # whole clip job — fall back to the plain vertical crop instead. A
+    # streamer would much rather get usable clips without the facecam split
+    # than an error and nothing at all.
+    try:
+        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        if cascade.empty():
+            print("WARNING: face cascade failed to load; skipping facecam detection.")
+            return None
+    except AttributeError as e:
+        print(f"WARNING: OpenCV is not fully functional ({e}); skipping facecam detection.")
+        return None
     frames = sample_frames(path, n_samples=n_samples)
     if not frames:
         return None
