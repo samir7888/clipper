@@ -43,6 +43,8 @@ import statistics
 import subprocess
 import sys
 
+import proc_utils
+
 
 def check_ffmpeg():
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
@@ -65,32 +67,90 @@ def get_duration(video_path):
 
 def measure_loudness(video_path, window_seconds=1.0):
     """
-    Walk through the audio track in fixed windows and record the mean
-    volume (RMS-based, in dB) for each window using ffmpeg's astats filter.
+    Measure loudness across the whole file in ONE ffmpeg pass.
+
+    PERFORMANCE NOTE: the obvious implementation — seeking to each window
+    and running a separate ffmpeg process per second — costs one process
+    spawn plus one file-open/seek per window. On a 2-hour recording that's
+    ~7200 subprocess launches, which dominates runtime and is brutally slow
+    on a low-CPU host. Instead, we stream the audio through a single ffmpeg
+    invocation: asetnsamples chunks it into fixed windows, astats computes
+    per-window RMS with reset=1, and ametadata prints each value to stdout.
+    One process, one sequential read.
 
     Returns a list of (start_time_seconds, mean_volume_db) tuples.
     Louder = closer to 0 dB. Quieter = more negative.
     """
+    # Audio is resampled to a known rate so window size in samples is exact.
+    sample_rate = 16000
+    samples_per_window = int(sample_rate * window_seconds)
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", video_path,
+        "-vn",  # ignore video entirely — we only need audio
+        "-ac", "1",  # mono: halves the work, and we only want overall level
+        "-ar", str(sample_rate),
+        "-af", (
+            f"aresample={sample_rate},"  # must resample INSIDE the chain:
+            # -ar only applies at output, after filters run, so without this
+            # asetnsamples would chunk at the source rate and every window
+            # timestamp would be wrong.
+            f"asetnsamples=n={samples_per_window}:p=0,"
+            f"astats=metadata=1:reset=1,"
+            f"ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-"
+        ),
+        "-f", "null", "-",
+    ]
+
+    result = proc_utils.run(cmd, capture_output=True, text=True)
+    values = _parse_ametadata_rms(result.stdout)
+
+    if not values:
+        # Fall back to the slow-but-simple per-window method if the single
+        # pass produced nothing (unusual codec, no audio stream, etc.) so a
+        # parsing quirk never silently breaks highlight detection.
+        return _measure_loudness_fallback(video_path, window_seconds)
+
+    return [(i * window_seconds, db) for i, db in enumerate(values)]
+
+
+def _parse_ametadata_rms(stdout_text):
+    """
+    Parse ffmpeg's ametadata print output, which emits lines like:
+        frame:0    pts:0    pts_time:0
+        lavfi.astats.Overall.RMS_level=-23.271970
+    Silent windows can report '-inf', which we normalize to a floor value.
+    """
+    values = []
+    for line in stdout_text.splitlines():
+        line = line.strip()
+        if "RMS_level=" in line:
+            raw = line.split("=", 1)[1].strip()
+            try:
+                db = float(raw)
+            except ValueError:
+                db = -90.0  # '-inf' / unparseable => treat as silence
+            if db == float("-inf") or db < -90.0:
+                db = -90.0
+            values.append(db)
+    return values
+
+
+def _measure_loudness_fallback(video_path, window_seconds=1.0):
+    """Original per-window implementation, kept as a safety net only."""
     duration = get_duration(video_path)
     results = []
     t = 0.0
     while t < duration:
         seg_len = min(window_seconds, duration - t)
-        cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
-            "-ss", str(t), "-t", str(seg_len), "-i", video_path,
-            "-af", "astats=metadata=1:reset=1",
-            "-f", "null", "-",
-        ]
-        # astats prints to stderr with -loglevel error unless we ask for info;
-        # use a dedicated run that captures stderr with astats output level.
         cmd_info = [
             "ffmpeg", "-hide_banner", "-loglevel", "info",
             "-ss", str(t), "-t", str(seg_len), "-i", video_path,
             "-af", "astats=metadata=1:reset=1",
             "-f", "null", "-",
         ]
-        result = subprocess.run(cmd_info, capture_output=True, text=True)
+        result = proc_utils.run(cmd_info, capture_output=True, text=True)
         db = parse_rms_db(result.stderr)
         results.append((t, db))
         t += window_seconds
@@ -164,7 +224,7 @@ def cut_clip(video_path, start, end, outpath):
         "-c", "copy",
         outpath,
     ]
-    subprocess.run(cmd, check=True)
+    proc_utils.run(cmd, check=True)
 
 
 def main():

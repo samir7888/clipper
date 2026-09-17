@@ -35,7 +35,19 @@ from enum import Enum
 from typing import Optional
 
 import auto_clip
+import proc_utils
 import vertical_reframe
+
+# Only allow this many jobs to be in the CPU-heavy processing stage at once.
+# On a fractional-CPU host, two concurrent encodes don't run twice as fast —
+# they run twice as slow each, double the peak memory, and make it far more
+# likely the container is OOM-killed or fails a health check. Queueing is
+# strictly better than thrashing.
+MAX_CONCURRENT_PROCESSING = int(os.environ.get("CLIP_MAX_CONCURRENT", "1"))
+_processing_slots = threading.Semaphore(MAX_CONCURRENT_PROCESSING)
+
+# Each clip costs a full re-encode, so this directly scales total CPU time.
+MAX_CLIPS = int(os.environ.get("CLIP_MAX_CLIPS", "10"))
 
 
 def _terminate_process_tree(proc, timeout=10):
@@ -105,7 +117,7 @@ def generate_thumbnail(clip_path):
     """Grab a frame partway into the clip as a small preview thumbnail."""
     thumb_path = clip_path.replace(".mp4", "_thumb.jpg")
     try:
-        subprocess.run(
+        proc_utils.run(
             [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-i", clip_path, "-ss", "0.5", "-vframes", "1",
@@ -284,6 +296,13 @@ class JobManager:
 
     def _process_job(self, job: Job):
         job.status = JobStatus.PROCESSING
+        # Wait for a processing slot before touching ffmpeg. The job shows
+        # as PROCESSING while queued, which is honest from the user's side —
+        # their clips are coming, just not started yet.
+        with _processing_slots:
+            self._process_job_inner(job)
+
+    def _process_job_inner(self, job: Job):
         try:
             if not os.path.exists(job.raw_path) or os.path.getsize(job.raw_path) == 0:
                 error_msg = "No video was recorded/uploaded (empty or missing file)."
@@ -297,7 +316,14 @@ class JobManager:
             # Stage 1: find and cut highlight clips (with graceful fallback
             # if the default sensitivity finds nothing on a calmer VOD)
             loudness = auto_clip.measure_loudness(job.raw_path, window_seconds=1.0)
-            highlights = find_highlights_with_fallback(loudness, top_n=10, min_gap=20.0)
+            highlights = find_highlights_with_fallback(loudness, top_n=MAX_CLIPS, min_gap=20.0)
+            # find_highlights_with_fallback only applies top_n on its
+            # last-resort path, so enforce the cap here too: take the
+            # strongest N, then restore chronological order.
+            highlights.sort(key=lambda h: h[1], reverse=True)
+            highlights = highlights[:MAX_CLIPS]
+            highlights.sort(key=lambda h: h[0])
+            print(f"Job {job.id}: cutting {len(highlights)} clip(s)")
             for i, (t, z) in enumerate(highlights, start=1):
                 start, end = t - 15, t + 10
                 clip_path = os.path.join(job.clips_dir, f"clip_{i:02d}.mp4")

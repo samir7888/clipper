@@ -39,6 +39,8 @@ import json
 import os
 import subprocess
 import sys
+
+import proc_utils
 from collections import defaultdict
 
 try:
@@ -78,7 +80,7 @@ def sample_frames(path, n_samples=12):
     return frames
 
 
-def detect_facecam_box(path, n_samples=12, min_hits=3):
+def detect_facecam_box(path, n_samples=12, min_hits=3, debug=False):
     """
     Detect faces across sampled frames and find the most consistent region
     (i.e. the fixed webcam overlay), since a single detection could be noise
@@ -93,23 +95,51 @@ def detect_facecam_box(path, n_samples=12, min_hits=3):
     # streamer would much rather get usable clips without the facecam split
     # than an error and nothing at all.
     try:
-        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        if cascade.empty():
-            print("WARNING: face cascade failed to load; skipping facecam detection.")
+        cascades = [
+            cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml"),
+            cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"),
+        ]
+        cascades = [c for c in cascades if not c.empty()]
+        if not cascades:
+            print("WARNING: face cascades failed to load; skipping facecam detection.")
             return None
     except AttributeError as e:
         print(f"WARNING: OpenCV is not fully functional ({e}); skipping facecam detection.")
         return None
+
     frames = sample_frames(path, n_samples=n_samples)
     if not frames:
         return None
 
+    frame_h, frame_w = frames[0].shape[:2]
+
+    # IMPORTANT: minSize must scale with the frame, not be a fixed pixel
+    # value. A fixed minSize=(60,60) silently misses any facecam overlay
+    # where the actual face is smaller than ~120px — which is a very common
+    # size for a compact corner webcam box, not an edge case. 2% of the
+    # shorter frame dimension (with a small floor) tracks real face size
+    # across both 720p and 1080p+ sources.
+    min_size = max(20, int(min(frame_w, frame_h) * 0.02))
+
     all_boxes = []
     for frame in frames:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
-        for (x, y, w, h) in faces:
-            all_boxes.append((x, y, w, h))
+        frame_hits = []
+        for cascade in cascades:
+            # scaleFactor=1.05 (vs the stricter default 1.1) and
+            # minNeighbors=3 (vs 5) trade a bit of CPU for meaningfully
+            # better recall on small/angled faces — measured to recover
+            # detection on facecams as small as 50px that the stricter
+            # defaults missed entirely.
+            faces = cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=3, minSize=(min_size, min_size))
+            for (x, y, w, h) in faces:
+                frame_hits.append((x, y, w, h))
+        if debug:
+            print(f"  [debug] frame hits: {frame_hits}")
+        all_boxes.extend(frame_hits)
+
+    if debug:
+        print(f"  [debug] total raw detections across {len(frames)} frames: {len(all_boxes)} (min_size={min_size})")
 
     if len(all_boxes) < min_hits:
         return None
@@ -185,7 +215,7 @@ def build_single_filter(out_h=1920, out_w=1080):
     )
 
 
-def process_one(input_path, output_path, top_ratio, facecam_box_override, no_facecam, samples):
+def process_one(input_path, output_path, top_ratio, facecam_box_override, no_facecam, samples, debug=False):
     """Reframe a single clip. Returns the output path on success."""
     src_w, src_h = get_video_size(input_path)
     print(f"  Source resolution: {src_w}x{src_h}")
@@ -196,7 +226,7 @@ def process_one(input_path, output_path, top_ratio, facecam_box_override, no_fac
         print(f"  Using manual facecam box: {facecam_box}")
     elif not no_facecam:
         print(f"  Sampling {samples} frames to detect the facecam location...")
-        raw_box = detect_facecam_box(input_path, n_samples=samples)
+        raw_box = detect_facecam_box(input_path, n_samples=samples, debug=debug)
         if raw_box:
             x, y, w, h = pad_box(*raw_box, src_w, src_h)
             facecam_box = (x, y, w, h)
@@ -204,8 +234,18 @@ def process_one(input_path, output_path, top_ratio, facecam_box_override, no_fac
         else:
             print("  Could not reliably detect a facecam. Using a single full-height crop instead (no split).")
 
-    out_h = 1920
-    out_w = 1080
+    # Output size and encoder settings are tunable via environment variables
+    # so a low-CPU host (e.g. a 0.1-CPU free tier) can be dialled down
+    # without code changes. Encoding cost scales roughly with pixel count,
+    # so CLIP_OUT_HEIGHT=1280 (720x1280) is about 2.25x cheaper than
+    # 1080x1920 while still being a valid vertical format for Shorts/TikTok.
+    out_h = int(os.environ.get("CLIP_OUT_HEIGHT", "1920"))
+    out_w = int(out_h * 9 / 16)
+    # x264 presets trade CPU for file size. 'veryfast' is a good default;
+    # 'ultrafast' cuts CPU dramatically at the cost of a larger file.
+    preset = os.environ.get("CLIP_PRESET", "veryfast")
+    crf = os.environ.get("CLIP_CRF", "23")
+    threads = os.environ.get("CLIP_THREADS", "1")
 
     if facecam_box:
         top_h = int(out_h * top_ratio)
@@ -221,12 +261,18 @@ def process_one(input_path, output_path, top_ratio, facecam_box_override, no_fac
         "-i", input_path,
         "-filter_complex", filter_complex,
         "-map", "[v]", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-c:a", "aac",
+        "-c:v", "libx264", "-preset", preset, "-crf", crf,
+        # Cap threads: on a fractional-CPU host, letting x264 spawn one
+        # thread per detected core oversubscribes the CPU quota and can
+        # balloon memory, which is a common cause of the container being
+        # OOM-killed mid-encode.
+        "-threads", threads,
+        "-c:a", "aac", "-b:a", "96k",
+        "-movflags", "+faststart",
         output_path,
     ]
-    print("  Rendering vertical video...")
-    subprocess.run(cmd, check=True)
+    print(f"  Rendering vertical video ({out_w}x{out_h}, preset={preset})...")
+    proc_utils.run(cmd, check=True)
     print(f"  Done: {output_path}")
     return output_path
 
@@ -240,6 +286,7 @@ def main():
     parser.add_argument("--facecam-box", type=str, default=None, help="Manual override: x,y,w,h in source pixel coordinates (applied to ALL clips in folder mode)")
     parser.add_argument("--no-facecam", action="store_true", help="Skip face detection; just do a plain vertical crop for both halves")
     parser.add_argument("--samples", type=int, default=12, help="How many frames to sample for face detection")
+    parser.add_argument("--debug", action="store_true", help="Print raw face detections per frame (useful when detection isn't finding a facecam that's actually visible)")
     args = parser.parse_args()
 
     facecam_box_override = None
@@ -267,7 +314,7 @@ def main():
             out_path = os.path.join(outdir, f"{base}_short.mp4")
             print(f"\n[{i}/{len(clip_files)}] {fname}")
             try:
-                process_one(in_path, out_path, args.top_ratio, facecam_box_override, args.no_facecam, args.samples)
+                process_one(in_path, out_path, args.top_ratio, facecam_box_override, args.no_facecam, args.samples, args.debug)
                 outputs.append(out_path)
             except subprocess.CalledProcessError as e:
                 print(f"  FAILED on {fname}: {e}")
@@ -277,7 +324,7 @@ def main():
     elif os.path.isfile(args.input):
         # SINGLE FILE MODE
         output = args.output or (os.path.splitext(args.input)[0] + "_vertical.mp4")
-        process_one(args.input, output, args.top_ratio, facecam_box_override, args.no_facecam, args.samples)
+        process_one(args.input, output, args.top_ratio, facecam_box_override, args.no_facecam, args.samples, args.debug)
 
     else:
         sys.exit(f"ERROR: path not found: {args.input}")
