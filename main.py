@@ -65,7 +65,11 @@ def build_record_command(url: str, out_path: str):
         "--add-header", "DNT:1",
         "--add-header", "Connection:keep-alive",
         "--add-header", "Upgrade-Insecure-Requests:1",
-        "--verbose"  # More detailed logging for debugging
+        "--verbose",  # More detailed logging for debugging
+        "--js-runtimes", "deno",  # required since yt-dlp 2025.11.12 for
+        # YouTube's signature challenges (see EJS wiki); harmless no-op
+        # for Kick. Explicit rather than relying on auto-detection so a
+        # future yt-dlp default change can't silently disable it.
     ]
 
 
