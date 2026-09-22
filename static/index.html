@@ -676,7 +676,7 @@
     <div class="panel">
       <div class="tabs">
         <button class="tab-btn active" id="tabLive" onclick="showTab('live')">Live stream</button>
-        <button class="tab-btn" id="tabUpload" onclick="showTab('upload')">Upload a VOD</button>
+        <button class="tab-btn" id="tabUpload" onclick="showTab('upload')">YouTube video</button>
       </div>
 
       <div id="liveTabPanel">
@@ -686,9 +686,9 @@
       </div>
 
       <div id="uploadTabPanel" class="hidden">
-        <label class="field-label" for="fileInput">Video file</label>
-        <input type="file" id="fileInput" accept="video/mp4">
-        <button class="btn btn-primary" onclick="uploadVod()">Upload and generate clips</button>
+        <label class="field-label" for="youtubeUrl">YouTube video link</label>
+        <input type="text" id="youtubeUrl" placeholder="youtube.com/watch?v=...">
+        <button class="btn btn-primary" onclick="startYoutubeVod()">Generate clips</button>
       </div>
     </div>
 
@@ -820,7 +820,7 @@
     }
 
     function setControlsEnabled(enabled) {
-      ['liveUrl', 'fileInput', 'tabLive', 'tabUpload'].forEach(id => document.getElementById(id).disabled = !enabled);
+      ['liveUrl', 'youtubeUrl', 'tabLive', 'tabUpload'].forEach(id => document.getElementById(id).disabled = !enabled);
       document.querySelectorAll('#liveTabPanel .btn, #uploadTabPanel .btn').forEach(b => b.disabled = !enabled);
     }
 
@@ -836,13 +836,20 @@
       onJobStarted(data.job_id, true);
     }
 
-    async function uploadVod() {
-      const file = document.getElementById('fileInput').files[0];
-      if (!file) return alert('Choose a video file first.');
+    async function startYoutubeVod() {
+      const url = document.getElementById('youtubeUrl').value.trim();
+      if (!url) return alert('Paste a YouTube link first.');
       setControlsEnabled(false);
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch(API_BASE + '/jobs/upload', { method: 'POST', body: form });
+      const res = await fetch(API_BASE + '/jobs/youtube-vod', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url})
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'That link could not be processed.');
+        setControlsEnabled(true);
+        return;
+      }
       const data = await res.json();
       onJobStarted(data.job_id, false);
     }

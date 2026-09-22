@@ -38,6 +38,15 @@ import auto_clip
 import proc_utils
 import vertical_reframe
 
+
+def seconds_to_hms(seconds):
+    """Convert seconds (float) to yt-dlp/ffmpeg-friendly HH:MM:SS.ms format."""
+    seconds = max(0, seconds)
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hrs:02d}:{mins:02d}:{secs:06.3f}"
+
 # Only allow this many jobs to be in the CPU-heavy processing stage at once.
 # On a fractional-CPU host, two concurrent encodes don't run twice as fast —
 # they run twice as slow each, double the peak memory, and make it far more
@@ -48,6 +57,11 @@ _processing_slots = threading.Semaphore(MAX_CONCURRENT_PROCESSING)
 
 # Each clip costs a full re-encode, so this directly scales total CPU time.
 MAX_CLIPS = int(os.environ.get("CLIP_MAX_CLIPS", "10"))
+# YouTube uploads use the segmented strategy (guaranteed spread, not a
+# spike count), so each clip is a fully independent download + encode —
+# fewer clips means proportionally less total time, which matters more
+# here since the whole point of the YouTube fix was reducing wait time.
+YOUTUBE_MAX_CLIPS = int(os.environ.get("CLIP_MAX_CLIPS_YOUTUBE", "5"))
 
 
 def _terminate_process_tree(proc, timeout=10):
@@ -131,6 +145,49 @@ def generate_thumbnail(clip_path):
     return thumb_path
 
 
+def find_highlights_segmented(loudness, n_clips=10, min_gap=20.0):
+    """
+    YouTube-specific highlight strategy: guarantee N clips SPREAD ACROSS
+    the whole video, regardless of how the audio behaves.
+
+    find_highlights_with_fallback (used for live Kick streams) looks for
+    moments that are LOUDER THAN THE AVERAGE — real spikes against a
+    calmer baseline. That fits raw stream mic audio well: reactions,
+    laughter, and hype genuinely stand out against quieter talk. It fits
+    produced YouTube uploads much less well — podcasts, vlogs, and edited
+    videos are typically mastered to a fairly consistent loudness on
+    purpose, so there may be few or no real "spikes" to find at all, which
+    is how this was collapsing to a single clip (or none) instead of
+    failing loudly.
+
+    This function sidesteps that entirely: it divides the video into
+    n_clips equal time segments and picks the loudest moment WITHIN each
+    segment — a purely relative, local comparison. Because each segment
+    is chosen independently by position, this is structurally incapable of
+    collapsing to one clip; it always returns up to n_clips highlights,
+    each from a different part of the video, however flat the audio is.
+    """
+    if not loudness:
+        return []
+
+    duration = loudness[-1][0]
+    if duration <= 0:
+        return []
+
+    segment_len = duration / n_clips
+    highlights = []
+    for i in range(n_clips):
+        seg_start = i * segment_len
+        seg_end = seg_start + segment_len
+        segment_windows = [(t, db) for t, db in loudness if seg_start <= t < seg_end]
+        if not segment_windows:
+            continue
+        peak_t, peak_db = max(segment_windows, key=lambda w: w[1])
+        highlights.append((peak_t, 0.0))  # score is informational only here
+
+    return highlights
+
+
 def find_highlights_with_fallback(loudness, top_n=10, min_gap=20.0):
     """
     Never return empty-handed. Real streams vary a lot in how 'spiky' their
@@ -177,6 +234,10 @@ class Job:
     clips: list = field(default_factory=list)
     process: Optional[subprocess.Popen] = None
     stop_requested: bool = False
+    # "live" (Kick/Twitch-style raw stream) uses spike-based detection;
+    # "youtube_vod" (produced/mastered uploads) uses segmented coverage.
+    # See find_highlights_segmented for why these need different logic.
+    source: str = "live"
 
     @property
     def dir(self):
@@ -204,13 +265,18 @@ class JobManager:
 
     # ---------- starting a job ----------
 
-    def start_live_job(self, url: str, record_command_builder) -> Job:
+    def start_live_job(self, url: str, record_command_builder, source: str = "live") -> Job:
         """
         Start recording a live URL. `record_command_builder(url, out_path)`
         returns the subprocess argv list to run (in production this calls
         yt-dlp; tests can swap in a synthetic ffmpeg source).
+
+        `source` selects which highlight-detection strategy runs later:
+        "live" (default) for raw stream audio, "youtube_vod" for produced/
+        mastered uploads. See find_highlights_segmented for why.
         """
         job = self._new_job()
+        job.source = source
         os.makedirs(job.dir, exist_ok=True)
 
         cmd = record_command_builder(url, job.raw_path)
@@ -241,6 +307,85 @@ class JobManager:
             self.jobs[job.id] = job
         threading.Thread(target=self._process_job, args=(job,), daemon=True).start()
         return job
+
+    def start_youtube_vod_job(self, url: str, format_flags: list) -> Job:
+        """
+        Generate clips from a YouTube video WITHOUT downloading the whole
+        thing first. The old path (start_live_job with a full-download
+        command) waited for the entire video to download — for a 1-2 hour
+        1080p upload, that's most of the processing time before anything
+        even starts. This instead:
+          1. Downloads ONLY the audio track (a small fraction of the size).
+          2. Finds highlight timestamps from that audio alone.
+          3. Downloads ONLY the video for those specific highlight windows
+             via yt-dlp --download-sections, not the whole file.
+        Net effect: total data downloaded and time spent scales with the
+        number of clips, not the length of the source video.
+        """
+        job = self._new_job()
+        job.source = "youtube_vod"
+        job.status = JobStatus.PROCESSING  # no separate "recording" phase here
+        os.makedirs(job.dir, exist_ok=True)
+        with self.lock:
+            self.jobs[job.id] = job
+        threading.Thread(
+            target=self._process_youtube_vod_job, args=(job, url, format_flags), daemon=True
+        ).start()
+        return job
+
+    def _process_youtube_vod_job(self, job: Job, url: str, format_flags: list):
+        with _processing_slots:
+            audio_path = os.path.join(job.dir, "audio.m4a")
+            try:
+                print(f"Job {job.id}: downloading audio only (fast pre-pass)...")
+                audio_cmd = ["yt-dlp", url, "-f", "bestaudio", "-o", audio_path] + format_flags
+                result = proc_utils.run(audio_cmd, capture_output=True, text=True, **{})
+                if result.returncode != 0 or not os.path.exists(audio_path):
+                    raise RuntimeError(f"Could not download audio. yt-dlp error: {result.stderr[-500:]}")
+
+                loudness = auto_clip.measure_loudness(audio_path, window_seconds=1.0)
+                print(f"Job {job.id}: audio duration~{loudness[-1][0] if loudness else 0:.0f}s, {len(loudness)} windows")
+                highlights = find_highlights_segmented(loudness, n_clips=YOUTUBE_MAX_CLIPS, min_gap=20.0)
+                if not highlights:
+                    raise RuntimeError("No usable audio found in this video.")
+
+                os.makedirs(job.clips_dir, exist_ok=True)
+                print(f"Job {job.id}: downloading {len(highlights)} highlight section(s) only...")
+                for i, (t, _z) in enumerate(highlights, start=1):
+                    start, end = t - 15, t + 10
+                    section = f"*{seconds_to_hms(start)}-{seconds_to_hms(end)}"
+                    raw_clip_path = os.path.join(job.clips_dir, f"raw_{i:02d}.mp4")
+                    section_cmd = [
+                        "yt-dlp", url,
+                        "--download-sections", section,
+                        "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best",
+                        "--merge-output-format", "mp4",
+                        "-o", raw_clip_path,
+                    ] + format_flags
+                    result = proc_utils.run(section_cmd, capture_output=True, text=True)
+                    if result.returncode != 0 or not os.path.exists(raw_clip_path):
+                        print(f"  [{i}/{len(highlights)}] FAILED to download section: {result.stderr[-300:]}")
+                        continue
+
+                    out_path = os.path.join(job.clips_dir, f"clip_{i:02d}_short.mp4")
+                    vertical_reframe.process_one(
+                        raw_clip_path, out_path, top_ratio=0.5,
+                        facecam_box_override=None, no_facecam=False, samples=10,
+                    )
+                    generate_thumbnail(out_path)
+                    delete_file_with_retry(raw_clip_path)  # keep only the final short clip
+                    print(f"  [{i}/{len(highlights)}] done")
+
+                job.clips = sorted(f for f in os.listdir(job.clips_dir) if f.endswith("_short.mp4"))
+                if not job.clips:
+                    raise RuntimeError("Could not generate any clips from this video.")
+                job.status = JobStatus.READY
+
+            except Exception as e:
+                job.status = JobStatus.FAILED
+                job.error = str(e)
+            finally:
+                delete_file_with_retry(audio_path)
 
     def _new_job(self) -> Job:
         return Job(id=str(uuid.uuid4())[:8], jobs_root=self.jobs_root)
@@ -313,10 +458,17 @@ class JobManager:
 
             os.makedirs(job.clips_dir, exist_ok=True)
 
-            # Stage 1: find and cut highlight clips (with graceful fallback
-            # if the default sensitivity finds nothing on a calmer VOD)
+            # Stage 1: find highlight clips. Which strategy runs depends on
+            # the content type — see find_highlights_segmented for why a
+            # single approach doesn't fit both raw streams and produced
+            # video.
             loudness = auto_clip.measure_loudness(job.raw_path, window_seconds=1.0)
-            highlights = find_highlights_with_fallback(loudness, top_n=MAX_CLIPS, min_gap=20.0)
+            print(f"Job {job.id}: source={job.source}, duration~{loudness[-1][0] if loudness else 0:.0f}s, {len(loudness)} loudness windows")
+
+            if job.source == "youtube_vod":
+                highlights = find_highlights_segmented(loudness, n_clips=YOUTUBE_MAX_CLIPS, min_gap=20.0)
+            else:
+                highlights = find_highlights_with_fallback(loudness, top_n=MAX_CLIPS, min_gap=20.0)
             # find_highlights_with_fallback only applies top_n on its
             # last-resort path, so enforce the cap here too: take the
             # strongest N, then restore chronological order.

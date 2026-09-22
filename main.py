@@ -45,6 +45,45 @@ class LiveRequest(BaseModel):
     url: str
 
 
+class YoutubeVodRequest(BaseModel):
+    url: str
+
+
+def is_youtube_url(url: str) -> bool:
+    url = url.lower()
+    return "youtube.com" in url or "youtu.be" in url
+
+
+def build_youtube_vod_command(url: str, out_path: str):
+    """
+    Download a FINISHED YouTube video (not live) for clip generation.
+    This is a plain download, not a live pull — yt-dlp runs to completion
+    and exits on its own once the file is fully downloaded, which the
+    existing job-manager watcher already handles correctly (this is the
+    same "process exits naturally" path already used for live streams that
+    end on their own, just triggered by a finished download instead).
+    """
+    return [
+        "yt-dlp", url,
+        # "best" alone only matches PRE-MERGED audio+video formats. Many
+        # modern YouTube uploads don't have any pre-merged format at all
+        # above low resolutions — everything higher is served as separate
+        # video-only and audio-only streams (DASH). Requesting them
+        # separately and letting ffmpeg mux them (via --merge-output-format)
+        # is the standard, robust pattern; "best" alone can fail outright
+        # with "Requested format is not available" on such videos.
+        "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best",
+        "--merge-output-format", "mp4",
+        "-o", out_path,
+        "--no-part",
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--socket-timeout", "30",
+        "--js-runtimes", "deno",  # required for YouTube's signature challenges
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ]
+
+
 def build_record_command(url: str, out_path: str):
     """
     PRODUCTION command: pull a live stream with yt-dlp until it ends
@@ -85,6 +124,19 @@ def upload_vod(file: UploadFile = File(...)):
     with open(tmp_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     job = manager.start_upload_job(tmp_path)
+    return {"job_id": job.id, "status": job.status}
+
+
+@app.post("/jobs/youtube-vod")
+def start_youtube_vod(req: YoutubeVodRequest):
+    """
+    Generate clips from an already-uploaded (finished) YouTube video.
+    YouTube only — Kick VODs go through the live-URL flow instead, since
+    that already handles both live pulls and finished streams.
+    """
+    if not is_youtube_url(req.url):
+        raise HTTPException(400, "That doesn't look like a YouTube link. This option is for YouTube videos only.")
+    job = manager.start_live_job(req.url, build_youtube_vod_command, source="youtube_vod")
     return {"job_id": job.id, "status": job.status}
 
 

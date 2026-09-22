@@ -155,20 +155,76 @@ def detect_facecam_box(path, n_samples=12, min_hits=3, debug=False):
         cell = (int(cx // cell_w), int(cy // cell_h))
         clusters[cell].append((x, y, w, h))
 
-    best_cluster = max(clusters.values(), key=len)
-    if len(best_cluster) < min_hits:
+    # Consider every cluster with enough hits, not just the single largest.
+    # A static in-game HUD portrait, character icon, or NPC face can easily
+    # be MORE consistent in position than a real webcam (it never moves at
+    # all), so hit-count alone isn't enough to tell them apart.
+    candidate_clusters = [c for c in clusters.values() if len(c) >= min_hits]
+    if not candidate_clusters:
         return None
 
-    xs = sorted(b[0] for b in best_cluster)
-    ys = sorted(b[1] for b in best_cluster)
-    ws = sorted(b[2] for b in best_cluster)
-    hs = sorted(b[3] for b in best_cluster)
+    def cluster_box(cluster):
+        xs = sorted(b[0] for b in cluster)
+        ys = sorted(b[1] for b in cluster)
+        ws = sorted(b[2] for b in cluster)
+        hs = sorted(b[3] for b in cluster)
+        med = lambda vals: vals[len(vals) // 2]
+        return med(xs), med(ys), med(ws), med(hs)
 
-    def median(vals):
-        return vals[len(vals) // 2]
+    def liveness_score(box):
+        """
+        The key discriminator between a real streamer and a static game
+        asset: a live person talking/blinking/moving produces continuous
+        frame-to-frame pixel change in their region. A fixed portrait,
+        HUD icon, or background character does not — even if it happens
+        to sit in a consistent position. We crop the SAME region across
+        every sampled frame (regardless of whether a face was detected
+        there each time) and measure how much it actually changes.
+        """
+        x, y, w, h = box
+        x, y = max(0, x), max(0, y)
+        crops = []
+        for frame in frames:
+            fh, fw = frame.shape[:2]
+            x2, y2 = min(fw, x + w), min(fh, y + h)
+            if x2 <= x or y2 <= y:
+                continue
+            crop = cv2.cvtColor(frame[y:y2, x:x2], cv2.COLOR_BGR2GRAY)
+            crops.append(cv2.resize(crop, (48, 48)))  # normalize size for comparison
+        if len(crops) < 2:
+            return 0.0
+        diffs = [
+            cv2.absdiff(crops[i], crops[i + 1]).mean()
+            for i in range(len(crops) - 1)
+        ]
+        return sum(diffs) / len(diffs)
 
-    x, y, w, h = median(xs), median(ys), median(ws), median(hs)
-    return (x, y, w, h)
+    # A static asset scores well under 1.0 here in practice (near-zero,
+    # since it's pixel-identical frame to frame); a real face — even
+    # sitting fairly still — has measurable movement from blinking,
+    # breathing, minor head motion, and talking. 2.0 is a conservative
+    # floor: comfortably above static-asset noise, comfortably below
+    # real human movement.
+    LIVENESS_THRESHOLD = 2.0
+
+    scored = []
+    for cluster in candidate_clusters:
+        box = cluster_box(cluster)
+        score = liveness_score(box)
+        if debug:
+            print(f"  [debug] candidate box={box} hits={len(cluster)} liveness={score:.2f}")
+        if score >= LIVENESS_THRESHOLD:
+            scored.append((len(cluster), score, box))
+
+    if not scored:
+        if debug:
+            print("  [debug] no candidate showed enough movement to be a real facecam")
+        return None
+
+    # Among candidates that show real movement, prefer the most
+    # consistently-positioned one.
+    scored.sort(key=lambda s: s[0], reverse=True)
+    return scored[0][2]
 
 
 def pad_box(x, y, w, h, frame_w, frame_h, pad_ratio=0.9):
