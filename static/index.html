@@ -311,19 +311,15 @@
 
     .progress-fill {
       height: 100%;
-      width: 40%;
+      width: 0%;
       background: var(--warn);
-      animation: slide 1.2s ease-in-out infinite;
+      transition: width 0.4s ease-out;
     }
 
-    @keyframes slide {
-      0% {
-        transform: translateX(-100%);
-      }
-
-      100% {
-        transform: translateX(250%);
-      }
+    .progress-label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
     }
 
     .clip-grid {
@@ -701,8 +697,9 @@
         </div>
       </div>
       <div class="progress-track hidden" id="progressTrack">
-        <div class="progress-fill"></div>
+        <div class="progress-fill" id="progressFill"></div>
       </div>
+      <div class="progress-label hidden" id="progressLabel"></div>
       <button class="btn btn-stop hidden" id="stopBtn" onclick="stopJob()">Stop stream</button>
 
       <div class="save-row hidden" id="saveRow">
@@ -804,8 +801,8 @@
     // Point this at your deployed backend URL (Railway or your VM's domain).
     // Leave as an empty string only if frontend and backend are on the same
     // domain (e.g. both served by the same FastAPI app, as in local testing).
-    const API_BASE = "https://clipper-kgln.onrender.com";
-    // const API_BASE = "http://localhost:8000";
+    // const API_BASE = "https://clipper-kgln.onrender.com";
+    const API_BASE = "http://localhost:8000";
 
     let currentJobId = null;
     let pollTimer = null;
@@ -944,7 +941,14 @@
       dot.className = 'dot ' + data.status;
       document.getElementById('statusText').textContent = copy.text;
       document.getElementById('statusSub').textContent = data.status === 'failed' ? (data.error || 'Unknown error.') : copy.sub;
-      document.getElementById('progressTrack').classList.toggle('hidden', data.status !== 'processing');
+      const isProcessing = data.status === 'processing';
+      document.getElementById('progressTrack').classList.toggle('hidden', !isProcessing);
+      document.getElementById('progressLabel').classList.toggle('hidden', !isProcessing);
+      if (isProcessing) {
+        const pct = data.progress || 0;
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressLabel').textContent = pct + '% complete';
+      }
 
       if (data.status === 'ready' || data.status === 'failed') {
         clearInterval(pollTimer);

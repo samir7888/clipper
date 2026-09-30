@@ -1,4 +1,5 @@
 """
+
 job_manager.py — Core state machine for a streamer's clip-generation job.
 
 Handles both live-URL recording and direct file uploads through the SAME
@@ -238,6 +239,9 @@ class Job:
     # "youtube_vod" (produced/mastered uploads) uses segmented coverage.
     # See find_highlights_segmented for why these need different logic.
     source: str = "live"
+    # 0-100, only meaningful during PROCESSING. Lets the frontend show a
+    # real percentage instead of a generic "please wait" spinner.
+    progress: int = 0
 
     @property
     def dir(self):
@@ -337,20 +341,27 @@ class JobManager:
         with _processing_slots:
             audio_path = os.path.join(job.dir, "audio.m4a")
             try:
+                job.progress = 2
                 print(f"Job {job.id}: downloading audio only (fast pre-pass)...")
                 audio_cmd = ["yt-dlp", url, "-f", "bestaudio", "-o", audio_path] + format_flags
                 result = proc_utils.run(audio_cmd, capture_output=True, text=True, **{})
                 if result.returncode != 0 or not os.path.exists(audio_path):
                     raise RuntimeError(f"Could not download audio. yt-dlp error: {result.stderr[-500:]}")
+                job.progress = 10
 
                 loudness = auto_clip.measure_loudness(audio_path, window_seconds=1.0)
                 print(f"Job {job.id}: audio duration~{loudness[-1][0] if loudness else 0:.0f}s, {len(loudness)} windows")
                 highlights = find_highlights_segmented(loudness, n_clips=YOUTUBE_MAX_CLIPS, min_gap=20.0)
                 if not highlights:
                     raise RuntimeError("No usable audio found in this video.")
+                job.progress = 15
 
                 os.makedirs(job.clips_dir, exist_ok=True)
                 print(f"Job {job.id}: downloading {len(highlights)} highlight section(s) only...")
+                # Remaining 85% is split across the clips, each one advancing
+                # progress by an equal share as it finishes (download + cut +
+                # vertical reframe + thumbnail all count as one unit of work).
+                progress_per_clip = 85 / len(highlights)
                 for i, (t, _z) in enumerate(highlights, start=1):
                     start, end = t - 15, t + 10
                     section = f"*{seconds_to_hms(start)}-{seconds_to_hms(end)}"
@@ -365,6 +376,7 @@ class JobManager:
                     result = proc_utils.run(section_cmd, capture_output=True, text=True)
                     if result.returncode != 0 or not os.path.exists(raw_clip_path):
                         print(f"  [{i}/{len(highlights)}] FAILED to download section: {result.stderr[-300:]}")
+                        job.progress = min(99, int(15 + progress_per_clip * i))
                         continue
 
                     out_path = os.path.join(job.clips_dir, f"clip_{i:02d}_short.mp4")
@@ -374,12 +386,14 @@ class JobManager:
                     )
                     generate_thumbnail(out_path)
                     delete_file_with_retry(raw_clip_path)  # keep only the final short clip
-                    print(f"  [{i}/{len(highlights)}] done")
+                    job.progress = min(99, int(15 + progress_per_clip * i))
+                    print(f"  [{i}/{len(highlights)}] done ({job.progress}%)")
 
                 job.clips = sorted(f for f in os.listdir(job.clips_dir) if f.endswith("_short.mp4"))
                 if not job.clips:
                     raise RuntimeError("Could not generate any clips from this video.")
                 job.status = JobStatus.READY
+                job.progress = 100
 
             except Exception as e:
                 job.status = JobStatus.FAILED
@@ -456,6 +470,7 @@ class JobManager:
                     error_msg += f" yt-dlp error: {job.process_stderr[:500]}"  # Limit error length
                 raise RuntimeError(error_msg)
 
+            job.progress = 2
             os.makedirs(job.clips_dir, exist_ok=True)
 
             # Stage 1: find highlight clips. Which strategy runs depends on
@@ -475,27 +490,39 @@ class JobManager:
             highlights.sort(key=lambda h: h[1], reverse=True)
             highlights = highlights[:MAX_CLIPS]
             highlights.sort(key=lambda h: h[0])
+            job.progress = 10
             print(f"Job {job.id}: cutting {len(highlights)} clip(s)")
+
+            # Cutting is fast (a stream copy, no re-encode) relative to the
+            # vertical reframe step below, so it only gets a small progress
+            # slice: 10% -> 25%.
+            n = max(1, len(highlights))
             for i, (t, z) in enumerate(highlights, start=1):
                 start, end = t - 15, t + 10
                 clip_path = os.path.join(job.clips_dir, f"clip_{i:02d}.mp4")
                 auto_clip.cut_clip(job.raw_path, start, end, clip_path)
+                job.progress = 10 + int(15 * i / n)
 
-            # Stage 2: reformat every clip to vertical (batch mode), plus a thumbnail for each
-            for fname in sorted(os.listdir(job.clips_dir)):
-                if fname.endswith(".mp4"):
-                    in_path = os.path.join(job.clips_dir, fname)
-                    out_path = os.path.join(job.clips_dir, fname.replace(".mp4", "_short.mp4"))
-                    vertical_reframe.process_one(
-                        in_path, out_path, top_ratio=0.5,
-                        facecam_box_override=None, no_facecam=False, samples=10,
-                    )
-                    generate_thumbnail(out_path)
+            # Stage 2: reformat every clip to vertical (batch mode), plus a
+            # thumbnail for each. This is the CPU-heavy step (face
+            # detection + re-encode), so it gets the bulk of the range.
+            clip_files = sorted(f for f in os.listdir(job.clips_dir) if f.endswith(".mp4"))
+            n = max(1, len(clip_files))
+            for i, fname in enumerate(clip_files, start=1):
+                in_path = os.path.join(job.clips_dir, fname)
+                out_path = os.path.join(job.clips_dir, fname.replace(".mp4", "_short.mp4"))
+                vertical_reframe.process_one(
+                    in_path, out_path, top_ratio=0.5,
+                    facecam_box_override=None, no_facecam=False, samples=10,
+                )
+                generate_thumbnail(out_path)
+                job.progress = min(99, 25 + int(74 * i / n))
 
             job.clips = sorted(
                 f for f in os.listdir(job.clips_dir) if f.endswith("_short.mp4")
             )
             job.status = JobStatus.READY
+            job.progress = 100
 
         except Exception as e:
             job.status = JobStatus.FAILED

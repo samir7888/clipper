@@ -136,7 +136,14 @@ def start_youtube_vod(req: YoutubeVodRequest):
     """
     if not is_youtube_url(req.url):
         raise HTTPException(400, "That doesn't look like a YouTube link. This option is for YouTube videos only.")
-    job = manager.start_live_job(req.url, build_youtube_vod_command, source="youtube_vod")
+    format_flags = [
+        "--js-runtimes", "deno",
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--socket-timeout", "30",
+    ]
+    job = manager.start_youtube_vod_job(req.url, format_flags)
     return {"job_id": job.id, "status": job.status}
 
 
@@ -158,6 +165,7 @@ def get_status(job_id: str):
         "status": job.status,
         "error": job.error,
         "clips": job.clips,
+        "progress": job.progress,
     }
 
 
