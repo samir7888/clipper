@@ -45,7 +45,7 @@ RUN pip install --no-cache-dir --upgrade "yt-dlp[default]@git+https://github.com
 RUN pip install --no-cache-dir --upgrade yt-dlp-ejs
 
 # Verify the JS runtime is actually wired up correctly at BUILD time, not
-# discovered later when a streamer is waiting on a YouTube pull. This will
+# discovered later when a Kick Streamer is waiting on a YouTube pull. This will
 # fail the build (not just warn) if Deno isn't detected.
 RUN yt-dlp --js-runtimes deno --verbose --simulate "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>&1 \
     | grep -q "JS runtimes: deno" \
@@ -53,7 +53,7 @@ RUN yt-dlp --js-runtimes deno --verbose --simulate "https://www.youtube.com/watc
     || (echo "ERROR: Deno JS runtime not detected by yt-dlp" && exit 1)
 
 # Fail the BUILD (not a user's job at runtime) if OpenCV isn't fully working.
-# Without this check, a broken cv2 only surfaces when a streamer is waiting
+# Without this check, a broken cv2 only surfaces when a Kick Streamer is waiting
 # on their clips — much better to catch it here.
 RUN python -c "import cv2; assert hasattr(cv2, 'CascadeClassifier'), 'cv2 install is broken'; \
     import os; p = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'; \

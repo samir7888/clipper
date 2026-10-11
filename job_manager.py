@@ -1,6 +1,6 @@
 """
 
-job_manager.py — Core state machine for a streamer's clip-generation job.
+job_manager.py — Core state machine for a Kick Streamer's clip-generation job.
 
 Handles both live-URL recording and direct file uploads through the SAME
 pipeline once a raw video file exists, and guarantees the raw video gets
@@ -57,7 +57,7 @@ MAX_CONCURRENT_PROCESSING = int(os.environ.get("CLIP_MAX_CONCURRENT", "1"))
 _processing_slots = threading.Semaphore(MAX_CONCURRENT_PROCESSING)
 
 # Each clip costs a full re-encode, so this directly scales total CPU time.
-MAX_CLIPS = int(os.environ.get("CLIP_MAX_CLIPS", "10"))
+MAX_CLIPS = int(os.environ.get("CLIP_MAX_CLIPS", "5"))
 # YouTube uploads use the segmented strategy (guaranteed spread, not a
 # spike count), so each clip is a fully independent download + encode —
 # fewer clips means proportionally less total time, which matters more
@@ -146,7 +146,7 @@ def generate_thumbnail(clip_path):
     return thumb_path
 
 
-def find_highlights_segmented(loudness, n_clips=10, min_gap=20.0):
+def find_highlights_segmented(loudness, n_clips=5, min_gap=20.0):
     """
     YouTube-specific highlight strategy: guarantee N clips SPREAD ACROSS
     the whole video, regardless of how the audio behaves.
@@ -204,7 +204,7 @@ def find_highlights_with_fallback(loudness, top_n=10, min_gap=20.0):
             return highlights
 
     # Last resort: no meaningful "spikes" at all (very flat audio) — just
-    # pick the loudest moments overall, spaced apart, so the streamer still
+    # pick the loudest moments overall, spaced apart, so the Kick Streamer still
     # gets clips instead of an error.
     sorted_by_loudness = sorted(loudness, key=lambda x: x[1], reverse=True)
     chosen = []

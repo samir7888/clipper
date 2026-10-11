@@ -1,5 +1,5 @@
 """
-main.py — FastAPI backend for the streamer clip app.
+main.py — FastAPI backend for the Kick Streamer clip app.
 
 Endpoints:
   POST /jobs/live      {url}   -> start recording a live  URL
@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from job_manager import JobManager, JobStatus
 
-app = FastAPI(title="Streamer Clip Generator")
+app = FastAPI(title="Kick Streamer Clip Generator")
 
 # Add CORS middleware
 app.add_middleware(

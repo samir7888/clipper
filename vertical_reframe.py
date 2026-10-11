@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 vertical_reframe.py — Turn a landscape clip into a vertical (9:16) Shorts/Reels
-layout: gameplay/main footage on top, streamer facecam zoomed in below it.
+layout: gameplay/main footage on top, Kick Streamer facecam zoomed in below it.
 
 HOW IT WORKS (no AI/LLM, no paid APIs):
   1. Samples several frames from the clip.
   2. Runs OpenCV's built-in Haar cascade face detector on each sampled frame
      (this ships free inside OpenCV — classical computer vision, not ML/AI,
      and requires no internet call or API key).
-  3. Since a streamer's webcam overlay almost always sits in a FIXED spot for
+  3. Since a Kick Streamer's webcam overlay almost always sits in a FIXED spot for
      the whole stream, it clusters the face detections to find that fixed
      region rather than trusting any single frame.
   4. Builds a 1080x1920 vertical video with ffmpeg:
@@ -92,7 +92,7 @@ def detect_facecam_box(path, n_samples=12, min_hits=3, debug=False):
     # Defensive: if OpenCV is installed but broken (a partial/incompatible
     # wheel where cv2 imports yet core classes are missing), don't fail the
     # whole clip job — fall back to the plain vertical crop instead. A
-    # streamer would much rather get usable clips without the facecam split
+    # Kick Streamer would much rather get usable clips without the facecam split
     # than an error and nothing at all.
     try:
         cascades = [
@@ -173,7 +173,7 @@ def detect_facecam_box(path, n_samples=12, min_hits=3, debug=False):
 
     def liveness_score(box):
         """
-        The key discriminator between a real streamer and a static game
+        The key discriminator between a real Kick Streamer and a static game
         asset: a live person talking/blinking/moving produces continuous
         frame-to-frame pixel change in their region. A fixed portrait,
         HUD icon, or background character does not — even if it happens

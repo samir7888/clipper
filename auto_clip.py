@@ -23,7 +23,7 @@ USAGE:
 
   Optional flags:
     --outdir DIR         Where to save clips (default: ./clips)
-    --top N              Only cut the N loudest highlights (default: 10)
+    --top N              Only cut the N loudest highlights (default: 5)
     --min-gap SECONDS    Merge spikes closer than this into one clip (default: 20)
     --pre SECONDS         Seconds of padding before each spike (default: 15)
     --post SECONDS        Seconds of padding after each spike (default: 10)
@@ -176,7 +176,7 @@ def find_spikes(loudness, sensitivity):
     """
     Flag windows that are unusually loud relative to the whole VOD's
     average loudness (a simple z-score threshold). This adapts per-VOD
-    so it works whether the streamer runs quiet or hot mic levels.
+    so it works whether the Kick Streamer runs quiet or hot mic levels.
     """
     values = [db for _, db in loudness if db > -90.0]
     if len(values) < 2:
@@ -231,7 +231,7 @@ def main():
     parser = argparse.ArgumentParser(description="No-AI VOD highlight clipper (loudness-based).")
     parser.add_argument("video", help="Path to the VOD/video file")
     parser.add_argument("--outdir", default="clips", help="Output folder for clips")
-    parser.add_argument("--top", type=int, default=10, help="Max number of clips to cut")
+    parser.add_argument("--top", type=int, default=5, help="Max number of clips to cut")
     parser.add_argument("--min-gap", type=float, default=20.0, help="Seconds to merge nearby spikes")
     parser.add_argument("--pre", type=float, default=15.0, help="Padding before spike (seconds)")
     parser.add_argument("--post", type=float, default=10.0, help="Padding after spike (seconds)")

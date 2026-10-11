@@ -651,6 +651,7 @@
   </style>
 </head>
 
+
 <body>
   <nav class="topnav">
     <a class="brand" href="#top">Clip Machine</a>
@@ -710,7 +711,11 @@
       <div class="clip-grid" id="clipsGrid"></div>
     </div>
   </div>
-
+  <div style="max-width: 640px; margin: 0 auto; padding: 20px 20px 20px; text-align: center;">
+    <a href="https://cr8rs.app/therealme/tip" target="_blank"
+      style="display: inline-block; background: var(--accent); color: #08260a; text-decoration: none; font-weight: 600; font-size: 14px; padding: 12px 24px; border-radius: 9px; transition: filter 0.15s;">Help
+      the developer ☕</a>
+  </div>
   <section class="content-section" id="how-it-works">
     <h2>How it works</h2>
     <ul class="steps-list">
@@ -838,8 +843,8 @@
       if (!url) return alert('Paste a YouTube link first.');
       setControlsEnabled(false);
       const res = await fetch(API_BASE + '/jobs/youtube-vod', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url})
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
